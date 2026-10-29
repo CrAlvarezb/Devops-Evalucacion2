@@ -1,35 +1,50 @@
-name: CI - Validacion basicas
+name: Pipeline CI-CD Evaluacion 2
 
 on:
   push:
-    branches: [ develop ]
+    branches: [ "main", "develop" ]
   pull_request:
-    branches: [ main ]
+    branches: [ "main" ]
 
 jobs:
-  validate:
+  pruebas-y-seguridad:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout codigo
-        uses: actions/checkout@v5
+      - name: Descargar codigo
+        uses: actions/checkout@v4
 
       - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 18
 
-      - name: Validar sintaxis backend
+      - name: Pruebas Unitarias Backend (IE2)
         run: |
           cd backend
           npm install
           npm test
 
-      - name: Validar sintaxis frontend
+      - name: Validacion Sintactica Frontend (IE2)
         run: node --check frontend/app.js
 
-      - name: Verificar estructura de carpetas
+      - name: Escaneo de Seguridad y Bloqueo (IE3)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: "fs"
+          ignore-unfixed: true
+          format: "table"
+          exit-code: "1"
+          severity: "CRITICAL"
+
+  despliegue-simulado:
+    needs: pruebas-y-seguridad
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar codigo
+        uses: actions/checkout@v4
+
+      - name: Construir y Desplegar con Docker Compose (IE4 e IE5)
         run: |
-          test -f docker-compose.yml && echo "docker-compose.yml OK"
-          test -d backend && echo "backend OK"
-          test -d frontend && echo "frontend OK"
+          docker compose build
+          docker compose up -d
+          docker compose ps
