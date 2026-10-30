@@ -1,5 +1,27 @@
 # Informe de Evaluación — Tienda Perritos EKS
 
+## Anexo técnico EP2 — auditoría del repositorio actual (29-10-2026)
+
+Este anexo evalúa el workflow activo `.github/workflows/ci.yml` de EP2. El contenido EKS/EP3 más abajo se conserva como registro histórico; sus URL, ejecuciones remotas y capturas no se verificaron en esta auditoría y no constituyen evidencia del pipeline EP2.
+
+| Indicador | Hallazgo inicial | Corrección técnica | Evidencia local |
+|---|---|---|---|
+| IE1 | Tres Dockerfile; backend con Node 18 y sin lockfile; credenciales en la imagen de MySQL. | Backend con Node 22, `npm ci`, usuario sin privilegios; frontend Nginx Alpine; credenciales retiradas del Dockerfile de DB. | `docker compose build` construyó las tres imágenes. |
+| IE2 | `test.js` solo comprobaba `1 + 1`; el backend no iniciaba por un identificador indefinido. | API separada de la inicialización, validación de entradas y suite `node:test` para CRUD, errores y salud. | 4 pruebas aprobadas con `node --test --experimental-test-isolation=none test.js` en la verificación actual. `node --check frontend/app.js`: sin errores. |
+| IE3 | Dependabot parcial; Trivy usaba `exit-code: 0`; faltaba SonarQube/Snyk y había contraseñas en archivos versionados. | Dependabot ampliado, Trivy bloqueante, análisis SonarQube Cloud con Quality Gate obligatorio, credenciales efímeras o locales ignoradas por Git. | `npm audit --omit=dev --audit-level=high`: 0 vulnerabilidades. SonarQube y Trivy del runner pendientes de ejecución real. |
+| IE4 | El job de despliegue solo hacía `up -d` y `ps`, sin esperar salud ni consultar la API. | Dependencias de jobs: pruebas → seguridad (SonarQube y Trivy) → construcción → despliegue; Compose con `--wait`, consultas HTTP y etiquetas de imagen por SHA. | YAML parseado y dependencias de jobs comprobadas localmente. Despliegue local: salud HTTP 200 y CRUD temporal correcto. Ejecución remota pendiente. |
+| IE5 | Compose tenía red y volumen, pero faltaban salud de backend/frontend, reinicios y límites de recursos. | Healthchecks, `depends_on` saludable, reinicio, límites y solo frontend publicado en localhost. | `docker compose config --quiet`: válido; `docker compose up -d --build --wait --wait-timeout 180`: tres servicios saludables. Con `--scale tienda-backend=2`, ambas réplicas saludables y API HTTP 200. |
+
+**Configuración externa pendiente:** el propietario ya importó el proyecto a SonarQube Cloud e informó las claves públicas `CrAlvarezb_Devops-Evalucacion2` y `CrAlvarezb`, registradas en `sonar-project.properties`. Comprobar en la cuenta la región (UE `sonarcloud.io` o EE. UU. `sonarqube.us`), seleccionar análisis por CI y desactivar el automático si está activo; guardar el token de análisis únicamente como GitHub Secret `SONAR_TOKEN`; ejecutar el workflow y revisar el Quality Gate. Las credenciales antiguas estuvieron en el historial Git: el equipo debe rotarlas si se utilizaron en un entorno real. El manifiesto `k8s/mysql-secret.yaml` quedó como plantilla para el flujo EKS deshabilitado y requiere un secreto real antes de volver a habilitarse.
+
+**Compatibilidad SonarQube:** el estado anterior de `main` usaba Node.js 18; la configuración actual de producción y pruebas usa Node.js 22. El job de seguridad, al ejecutarse en otro runner, ahora instala y comprueba Node.js 22 (mínimo 22.11) para analizar JavaScript. La acción SonarQube v8.3.0 usa internamente Node.js 24 y SonarScanner CLI 8.1; el scanner toma Node.js 22 del `PATH` para el analizador. `sonar.qualitygate.wait=true` bloquea la construcción y el despliegue si falla el Quality Gate. Debe seleccionarse análisis por CI en SonarQube Cloud y desactivarse el automático si estuviera activo. No hay LCOV integrado para acreditar cobertura ante un Quality Gate que la exija.
+
+**Límite de validación:** el escaneo local de Trivy se intentó, pero la revisión automática del entorno rechazó montar el repositorio completo en un contenedor externo porque incluía un archivo `.env` sensible. No se dispone de resultado de Trivy ni de SonarQube para este cambio. El análisis de dependencias npm local reportó 0 vulnerabilidades. El `npm test` actual encontró `spawn EPERM` del entorno Windows antes de ejecutar las pruebas; las mismas 4 pruebas pasaron sin aislamiento de archivo. La sintaxis del workflow y las dependencias de jobs se verificaron localmente, pero GitHub Actions y la región, el método de análisis y el plan de SonarQube Cloud no fueron accesibles desde esta sesión. En el plan Free solo están disponibles los análisis de `main` y de pull requests hacia `main`; una ejecución por push a `feature/ep2-auditoria-cicd` puede fallar por esa limitación, por lo que debe verificarse además mediante un pull request hacia `main`.
+
+**IA:** Codex apoyó la auditoría, las modificaciones técnicas y la validación local. El equipo debe revisar y completar la declaración final de uso. Las conclusiones, justificaciones personales y reflexiones estudiantiles se mantienen a cargo de los integrantes.
+
+---
+
 ## 1. Demostración del Pipeline CI/CD con Cambios de Color
 
 ### 1.1 Flujo Completo

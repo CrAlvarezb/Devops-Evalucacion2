@@ -5,10 +5,9 @@
     "main": "server.js",
     "scripts": {
         "start": "node server.js",
-        "test": "node test.js"
+        "test": "node --test test.js"
     },
     "dependencies": {
-        "cors": "^2.8.5",
         "express": "^4.19.0",
         "mysql2": "^3.9.0"
     }
