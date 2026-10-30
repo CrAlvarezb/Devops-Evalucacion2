@@ -63,7 +63,7 @@ El workflow etiqueta las imágenes con `GITHUB_SHA`, lo que permite relacionar u
 
 El historial local de Compose contiene contraseñas antes versionadas. Si se usaron en algún entorno real, corresponde rotarlas; retirarlas de los archivos actuales no las elimina del historial. El informe técnico anterior también registra que `npm test` encontró un error `spawn EPERM` en Windows durante una verificación, aunque las pruebas pasaron al ejecutarse sin aislamiento de archivo. Ese resultado no se repitió en esta revisión.
 
-En la [ejecución del commit `817d484`](https://github.com/CrAlvarezb/Devops-Evalucacion2/actions/runs/41143418593), `pruebas` y el paso de análisis SonarQube con espera del Quality Gate terminaron correctamente. El paso de Trivy falló, por lo que `construccion` y `despliegue-simulado` quedaron omitidos. El resultado de este intento no acredita un despliegue aprobado; la causa detallada del fallo de Trivy debe revisarse en el log de ese job.
+En la [ejecución del commit `817d484`](https://github.com/CrAlvarezb/Devops-Evalucacion2/actions/runs/41143418593), `pruebas` y el paso de análisis SonarQube con espera del Quality Gate terminaron correctamente. El paso de Trivy falló, por lo que `construccion` y `despliegue-simulado` quedaron omitidos. El [log del PR de documentación](https://github.com/CrAlvarezb/Devops-Evalucacion2/actions/runs/41144917040/job/124367722167) muestra el mismo bloqueo: Trivy reporta `DS-0002` de severidad HIGH por la falta de una instrucción `USER` con usuario no privilegiado en `db/Dockerfile` y `frontend/Dockerfile`. Estas ejecuciones no acreditan un despliegue aprobado.
 
 ## Trazabilidad y evidencias
 
