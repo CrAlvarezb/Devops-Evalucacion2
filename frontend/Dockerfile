@@ -1,4 +1,4 @@
-FROM nginx:alpine
+FROM nginx:stable-alpine
 
 # Copiar configuración de NGINX
 COPY default.conf /etc/nginx/conf.d/default.conf

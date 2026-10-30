@@ -1,7 +1,8 @@
-FROM node:18-alpine
+FROM node:22-alpine
 WORKDIR /app
-COPY package.json .
-COPY server.js .
-RUN npm install --production
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+COPY server.js ./
+USER node
 EXPOSE 3001
-CMD ["node","server.js"]
+CMD ["node", "server.js"]

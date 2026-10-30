@@ -1,47 +1,66 @@
-﻿services:
+services:
   tienda-db:
     build: ./db
-    container_name: tienda-db
+    image: tienda-db:${APP_VERSION:-local}
+    mem_limit: 1g
+    cpus: 1.0
     environment:
-      MYSQL_ROOT_PASSWORD: admin123
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?Set DB_ROOT_PASSWORD}
       MYSQL_DATABASE: tienda_perritos
+      MYSQL_USER: tienda_app
+      MYSQL_PASSWORD: ${DB_APP_PASSWORD:?Set DB_APP_PASSWORD}
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-padmin123"]
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 --silent || exit 1"]
       interval: 10s
       timeout: 5s
-      retries: 10
-    networks:
-      - tienda-net
+      retries: 12
+      start_period: 30s
+    restart: unless-stopped
+    networks: [tienda-net]
 
   tienda-backend:
     build: ./backend
-    container_name: tienda-backend
+    image: tienda-backend:${APP_VERSION:-local}
+    mem_limit: 512m
+    cpus: 1.0
     environment:
-      PORT: 3001
+      PORT: "3001"
       DB_HOST: tienda-db
-      DB_USER: root
-      DB_PASSWORD: admin123
+      DB_USER: tienda_app
+      DB_PASSWORD: ${DB_APP_PASSWORD:?Set DB_APP_PASSWORD}
       DB_NAME: tienda_perritos
-      DB_PORT: 3306
-    ports:
-      - "3001:3001"
+      DB_PORT: "3306"
     depends_on:
       tienda-db:
         condition: service_healthy
-    networks:
-      - tienda-net
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3001/api/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+    restart: unless-stopped
+    networks: [tienda-net]
 
   tienda-frontend:
     build: ./frontend
-    container_name: tienda-frontend
+    image: tienda-frontend:${APP_VERSION:-local}
+    mem_limit: 128m
+    cpus: 0.5
     ports:
-      - "8080:80"
+      - "127.0.0.1:8080:80"
     depends_on:
-      - tienda-backend
-    networks:
-      - tienda-net
+      tienda-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+    networks: [tienda-net]
 
 volumes:
   mysql_data:

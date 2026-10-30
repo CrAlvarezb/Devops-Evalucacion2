@@ -67,6 +67,12 @@ function filtrarProductos(filtro) {
   );
 }
 
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  })[char]);
+}
+
 function renderProductos(filtro) {
   const visibles = filtro ? filtrarProductos(filtro) : productos;
   tbody.innerHTML = "";
@@ -74,14 +80,14 @@ function renderProductos(filtro) {
     const tr = document.createElement("tr");
 
     tr.innerHTML = `
-      <td>${p.id}</td>
-      <td>${p.nombre}</td>
-      <td>${p.descripcion || ""}</td>
+      <td>${escapeHtml(p.id)}</td>
+      <td>${escapeHtml(p.nombre)}</td>
+      <td>${escapeHtml(p.descripcion)}</td>
       <td>$${Number(p.precio).toFixed(2)}</td>
-      <td>${p.stock}</td>
+      <td>${escapeHtml(p.stock)}</td>
       <td>
-        <button data-id="${p.id}" class="btn-editar">Editar</button>
-        <button data-id="${p.id}" class="btn-eliminar danger">Eliminar</button>
+        <button data-id="${escapeHtml(p.id)}" class="btn-editar">Editar</button>
+        <button data-id="${escapeHtml(p.id)}" class="btn-eliminar danger">Eliminar</button>
       </td>
     `;
 
@@ -162,9 +168,10 @@ async function guardarProducto() {
       throw new Error(data.message || "Error al guardar el producto");
     }
 
+    const fueEdicion = Boolean(editandoId);
     limpiarFormulario();
     await cargarProductos();
-    setStatus(editandoId ? "Producto actualizado correctamente." : "Producto creado correctamente.", "ok");
+    setStatus(fueEdicion ? "Producto actualizado correctamente." : "Producto creado correctamente.", "ok");
   } catch (err) {
     console.error(err);
     setStatus("Ocurrió un error al guardar el producto.", "error");
