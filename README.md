@@ -1,38 +1,42 @@
-# Tienda Perritos — Evaluación Parcial 2, Ingeniería DevOps
+# Tienda Perritos — Evaluación Parcial 2 de Ingeniería DevOps (DOY0101)
 
-**Integrantes:** Cristian Alvarez B. y Cristian Caceres G.
+**Integrantes:** Cristian Alvarez B. (`CrAlvarezb`) y Cristian Caceres G. (`cristianzintro`).
 
-## Arquitectura
+## Descripción y arquitectura
 
-| Servicio | Tecnología | Función | Acceso |
-|---|---|---|---|
-| tienda-frontend | Nginx, HTML y JavaScript | Interfaz y proxy de `/api/` | http://127.0.0.1:8080 |
-| tienda-backend | Node.js 22, Express, mysql2 | API CRUD y salud | Red interna de Compose |
-| tienda-db | MySQL 8 | Datos de productos | Red interna de Compose |
+Tienda Perritos permite consultar, buscar, crear, editar y eliminar productos desde una página web. El navegador solicita los datos a una API, que los guarda en MySQL. El pipeline de GitHub Actions busca comprobar los cambios mediante pruebas, análisis de seguridad, construcción de imágenes y un despliegue temporal con Docker Compose.
 
-Nginx envía las solicitudes API a `tienda-backend:3001`. El backend usa el usuario `tienda_app` para acceder a MySQL. Compose conecta los tres servicios en `tienda-net` y conserva los datos en `mysql_data`. Los Dockerfile de frontend, backend y base de datos están en sus respectivas carpetas. Los manifiestos `k8s/` y los workflows `*.disabled` son material heredado de otro despliegue y no forman parte del flujo EP2 activo.
+Este documento describe la rama `feature/ep2-auditoria-cicd` (commit `2a9bd5a`). La referencia local de `main` está en `9925eea`: **los cambios de esta rama todavía no forman parte de `main`**. No se pudo consultar GitHub en vivo para confirmar si esas referencias siguen siendo las más recientes.
+
+| Componente | Tecnología y función | Puerto |
+|---|---|---|
+| `tienda-frontend` | Nginx sirve HTML y JavaScript; envía `/api/` al backend | 80 interno; `127.0.0.1:8080` en el equipo |
+| `tienda-backend` | Node.js 22, Express y `mysql2`; API de productos y endpoint de salud | 3001, solo en la red de Compose |
+| `tienda-db` | MySQL 8; almacena productos y ejecuta `db/init.sql` al crear una base nueva | 3306, solo en la red de Compose |
+
+La configuración está en [docker-compose.yml](docker-compose.yml). Nginx dirige las solicitudes a `tienda-backend:3001`; el backend se conecta a `tienda-db:3306`. Los contenedores comparten la red `tienda-net` y `mysql_data` conserva los datos. Hay tres Dockerfiles: [frontend](frontend/Dockerfile), [backend](backend/Dockerfile) y [base de datos](db/Dockerfile). El frontend y la API son dos componentes de aplicación separados; la base de datos es infraestructura, no un microservicio. El repositorio no demuestra dos servicios de negocio independientes, como podría exigir una interpretación estricta de la pauta.
 
 ## Instalación y ejecución local
 
-Se requiere Docker Desktop con motor Linux y Docker Compose. Para ejecutar pruebas fuera de Docker se necesita Node.js 22 y npm.
-
-1. Copiar `.env.example` a `.env`.
-2. Sustituir ambos valores de ejemplo por contraseñas únicas. `.env` está excluido de Git. Si ya existe un volumen `mysql_data` inicializado con credenciales antiguas, deben usarse esas credenciales o recrearse el volumen local de forma deliberada.
-3. Ejecutar:
+Se necesitan Docker con contenedores Linux y Docker Compose. Para ejecutar las pruebas fuera de Docker se necesitan Node.js 22 y npm. Desde la raíz del repositorio, copia `.env.example` a `.env` y reemplaza `DB_ROOT_PASSWORD` y `DB_APP_PASSWORD` por valores propios. `.env` figura en [.gitignore](.gitignore). No publiques ese archivo. Si `mysql_data` ya fue inicializado con otras credenciales, la base seguirá usando las anteriores hasta que se cambien allí o se recree deliberadamente el volumen.
 
 ```sh
 docker compose config --quiet
-docker compose up -d --build --wait --wait-timeout 180
+docker compose build
+docker compose up -d --wait --wait-timeout 180
 docker compose ps
 curl --fail http://127.0.0.1:8080/api/health
 curl --fail http://127.0.0.1:8080/api/productos
+docker compose down
 ```
 
-`docker compose down` detiene los contenedores y conserva los datos. `docker compose down -v` también borra el volumen, por lo que debe usarse solo si los datos locales pueden descartarse. El frontend es el único puerto publicado, limitado a localhost. Compose usa healthchecks de MySQL, API y Nginx, orden de arranque por salud y reinicio `unless-stopped`. Las imágenes se etiquetan con `APP_VERSION` (por defecto `local`); el pipeline usa el SHA del commit.
+`build` construye las tres imágenes; `up` inicia los servicios y `--wait` espera sus *healthchecks*. Las consultas HTTP comprueban además la respuesta de la API a través de Nginx. `down` detiene los contenedores y conserva `mysql_data`; `docker compose down -v` elimina también los datos del volumen. Compose etiqueta las imágenes con `APP_VERSION`, cuyo valor local predeterminado es `local`.
 
-Para comprobar dos réplicas del backend: `docker compose up -d --scale tienda-backend=2 --wait --wait-timeout 180` y `docker compose ps`. El proxy sigue disponible en localhost. Esta prueba valida que las réplicas arrancan y responden; no mide balanceo de carga ni rendimiento.
+Compose aplica límites de CPU y memoria, reinicio `unless-stopped` y *healthchecks* a los tres servicios. MySQL debe estar saludable antes de iniciar el backend, y el backend antes del frontend. Para levantar dos instancias del backend se puede usar `docker compose up -d --scale tienda-backend=2 --wait --wait-timeout 180`. Esto es escalado manual; no hay autoescalado en el flujo Compose de esta evaluación. Los manifiestos de `k8s/` y los workflows `*.disabled` corresponden a despliegues anteriores y no se ejecutan en el pipeline EP2 activo.
 
-## Pruebas
+## Pruebas y calidad
+
+La suite de [backend/test.js](backend/test.js) usa `node:test` con respuestas simuladas de MySQL. Comprueba validación de productos e identificadores, códigos HTTP del CRUD, parámetros de las consultas SQL y la respuesta de salud cuando la base de datos funciona o falla. `node --check` solo revisa la sintaxis del JavaScript del frontend; no prueba su comportamiento. Los comandos definidos por [backend/package.json](backend/package.json) y el workflow son:
 
 ```sh
 cd backend
@@ -42,43 +46,56 @@ cd ..
 node --check frontend/app.js
 ```
 
-La suite usa `node:test` y comprueba validación, códigos HTTP, consultas parametrizadas, CRUD y salud ante falla de base de datos. `npm test` devuelve un código distinto de cero si falla una prueba. La revisión sintáctica del frontend complementa estas pruebas; no se presenta como prueba unitaria.
+El [informe técnico](INFORME_EVALUACION.md) y el README anterior registran verificaciones locales del 29 de octubre de 2026, incluidas pruebas y consultas HTTP. No se volvieron a ejecutar durante esta actualización de documentación. No hay reporte LCOV de cobertura integrado al análisis SonarQube.
 
-## Pipeline CI/CD
+## Pipeline CI/CD y seguridad
 
-`.github/workflows/ci.yml` se activa con push a `main`, `develop` o `feature/ep2-auditoria-cicd`, con pull requests hacia `main` o `develop`, y manualmente. Los jobs dependen del anterior:
+En **esta rama**, [.github/workflows/ci.yml](.github/workflows/ci.yml) se activa por `push` a `main`, `develop` o `feature/ep2-auditoria-cicd`, por pull requests hacia `main` o `develop`, y manualmente. Sus jobs se encadenan en este orden:
 
-1. **pruebas:** `npm ci`, `npm test` y sintaxis del frontend.
-2. **seguridad:** SonarQube Cloud analiza el código y espera el Quality Gate; un resultado fallido detiene el pipeline. Después, Trivy revisa dependencias, configuración y secretos del flujo activo, con bloqueo en hallazgos HIGH o CRITICAL. Excluye `k8s/` y `tools/`, que pertenecen al despliegue heredado deshabilitado. Dependabot propone semanalmente actualizaciones de npm, Docker y GitHub Actions.
-3. **construccion:** valida Compose y construye imágenes Docker solo si pruebas, SonarQube y Trivy finalizaron correctamente.
-4. **despliegue-simulado:** crea contraseñas efímeras, construye y levanta Compose en el runner, espera servicios saludables y consulta la API mediante el proxy Nginx. Al terminar muestra estado y logs, y elimina los recursos efímeros.
+1. **`pruebas`:** instala con `npm ci`, ejecuta `npm test` en el backend y revisa la sintaxis del frontend.
+2. **`seguridad`:** exige el secret `SONAR_TOKEN`, ejecuta SonarQube Cloud y espera el Quality Gate. Luego Trivy escanea vulnerabilidades, configuración y secretos, omitiendo `k8s/` y `tools/`. Con severidad `HIGH,CRITICAL` y `exit-code: "1"`, un hallazgo de esas severidades hace fallar el job.
+3. **`construccion`:** valida Compose, construye las imágenes y comprueba las etiquetas del backend y frontend. Depende del éxito de `seguridad`.
+4. **`despliegue-simulado`:** genera credenciales temporales, vuelve a construir y levanta Compose en su propio runner, espera los *healthchecks* y consulta `/api/health` y `/api/productos` por Nginx. Registra estado y logs y elimina los recursos al terminar. No publica un entorno permanente.
 
-Cada ejecución identifica el commit por `GITHUB_SHA` y etiqueta las imágenes con ese SHA. La vista de GitHub Actions vincula commit, pruebas, escaneo y despliegue. Una construcción por sí sola no constituye despliegue. El despliegue del runner es temporal y no publica un entorno persistente.
+El workflow etiqueta las imágenes con `GITHUB_SHA`, lo que permite relacionar una ejecución con el commit. Cada job usa un runner distinto; la construcción del tercer job y el despliegue del cuarto no comparten imágenes locales. [Dependabot](.github/dependabot.yml) está configurado para proponer actualizaciones semanales de npm, imágenes Docker y GitHub Actions; sus propuestas y resultados deben comprobarse en GitHub.
 
-El backend en Docker y el job de pruebas usan Node.js 22. El job de seguridad configura Node.js 22 de forma independiente y comprueba que sea al menos 22.11 para el análisis JavaScript; SonarScanner usa ese `node` del `PATH`. La acción SonarQube v8.3.0 se ejecuta internamente con Node.js 24 y descarga SonarScanner CLI 8.1; estas versiones no cambian el runtime de producción. `sonar-project.properties` contiene el alcance del análisis y las claves públicas `CrAlvarezb_Devops-Evalucacion2` y `CrAlvarezb`. El token solo se lee desde GitHub Secrets.
+[sonar-project.properties](sonar-project.properties) define el proyecto y el alcance del análisis. El token de SonarQube debe guardarse como `SONAR_TOKEN` en **GitHub → Settings → Secrets and variables → Actions**, sin incluir su valor en el repositorio. Las contraseñas locales se proporcionan mediante `.env`; el workflow genera otras efímeras en los runners. La configuración espera el Quality Gate (`sonar.qualitygate.wait=true`) y, si falla el análisis o el gate, no llega a construcción ni despliegue. **No se verificó una ejecución remota ni el resultado del Quality Gate**, y sigue pendiente confirmar en la cuenta la región, el método de análisis, el token y la disponibilidad del análisis para esta rama. Tener la clave del proyecto configurada no acredita por sí solo un análisis aprobado.
 
-### Configuración manual en GitHub y SonarQube Cloud
+El historial local de Compose contiene contraseñas antes versionadas. Si se usaron en algún entorno real, corresponde rotarlas; retirarlas de los archivos actuales no las elimina del historial. El informe técnico anterior también registra que `npm test` encontró un error `spawn EPERM` en Windows durante una verificación, aunque las pruebas pasaron al ejecutarse sin aislamiento de archivo. Ese resultado no se repitió en esta revisión.
 
-1. El proyecto ya fue importado a SonarQube Cloud. En **Project Information**, confirmar que la clave sea `CrAlvarezb_Devops-Evalucacion2`, la organización `CrAlvarezb` y la región del proyecto. El workflow usa `https://sonarcloud.io` (UE); si el proyecto está en la región de EE. UU., cambiar `SONAR_HOST_URL` a `https://sonarqube.us`. Esta región aún requiere comprobación en la cuenta.
-2. En **Project > Administration > Analysis Method**, seleccionar análisis por CI y desactivar el análisis automático si está activo. SonarQube Cloud no admite ambos métodos simultáneamente para el mismo proyecto. Esta opción aún requiere comprobación en la cuenta.
-3. En SonarQube Cloud, abrir **My Account > Security** y generar un token con permiso de análisis. En GitHub, abrir **Settings > Secrets and variables > Actions > Secrets > New repository secret** y guardarlo como `SONAR_TOKEN`. No mostrar su valor ni colocarlo en archivos del repositorio. Las claves públicas ya están en `sonar-project.properties`; no hacen falta variables de GitHub adicionales.
-4. Revisar el Quality Gate asignado al proyecto y permitir que el runner de Actions acceda a SonarQube Cloud. Los pull requests de forks no reciben secrets por defecto; en ese caso el job de seguridad fallará sin desplegar.
-5. Tras un commit y push autorizados a `feature/ep2-auditoria-cicd`, abrir **GitHub > Actions > EP2 CI/CD > ejecución del commit**. Abrir también un pull request de esa rama hacia `main` y revisar su ejecución: el plan Free de SonarQube Cloud analiza `main` y los pull requests hacia `main`, pero no otras ramas por push; en ese plan la ejecución del push a la rama puede fallar en SonarQube aunque la del pull request sea válida. Confirmar `pruebas`, `seguridad` (SonarQube, Quality Gate y Trivy), `construccion` y `despliegue-simulado`, y consultar el análisis del pull request en SonarQube Cloud. Exigir `seguridad` como comprobación de rama antes de fusionar. No hay informe de cobertura LCOV integrado; si el Quality Gate exige cobertura, puede fallar hasta que el equipo agregue ese reporte o mejore las pruebas.
+En la referencia local de **`main`**, el workflow tiene dos jobs (`pruebas-y-seguridad` y `despliegue-simulado`) y se activa con `push` a `main` o `develop` y pull requests hacia `main`. Allí Trivy usa `exit-code: "0"`, por lo que sus hallazgos no bloquean el pipeline; tampoco hay análisis SonarQube ni consulta HTTP después de `docker compose up -d`. La configuración bloqueante descrita arriba está pendiente de integración en `main`.
 
-La integración SonarQube está configurada localmente pero aún no validada en una ejecución remota. No se ha confirmado aquí ninguna ejecución de Actions, resultado del Quality Gate, método de análisis ni región del proyecto.
+## Trazabilidad y evidencias
 
-## Evidencia técnica local
+Los commits identifican los cambios de cada integrante; los merges locales registran los pull requests [#1](https://github.com/CrAlvarezb/Devops-Evalucacion2/pull/1), [#2](https://github.com/CrAlvarezb/Devops-Evalucacion2/pull/2), [#3](https://github.com/CrAlvarezb/Devops-Evalucacion2/pull/3), [#4](https://github.com/CrAlvarezb/Devops-Evalucacion2/pull/4) y [#5](https://github.com/CrAlvarezb/Devops-Evalucacion2/pull/5). [GitHub Actions](https://github.com/CrAlvarezb/Devops-Evalucacion2/actions) permite consultar, para cada SHA, los jobs y sus logs cuando se ejecuten. Los enlaces a PR y Actions se derivan del historial y del remoto configurado localmente; su estado actual no se pudo corroborar en línea.
 
-Durante la auditoría del 29 de octubre de 2026, las 4 pruebas pasaron, `npm audit --omit=dev --audit-level=high` reportó 0 vulnerabilidades, `node --check frontend/app.js` y `docker compose config --quiet` terminaron sin errores. `docker compose build` construyó las tres imágenes. `docker compose up -d --build --wait --wait-timeout 180` dejó los tres servicios saludables. Mediante http://127.0.0.1:8080/api se obtuvo salud HTTP 200, 5 productos iniciales y se creó, leyó, actualizó y eliminó un producto temporal. Con `--scale tienda-backend=2`, ambas réplicas quedaron saludables y la API siguió respondiendo HTTP 200. En la verificación actual, `npm ci`, `npm audit` y `docker compose build` pasaron; las 4 pruebas pasaron con `node --test --experimental-test-isolation=none test.js`. `npm test` recibió `spawn EPERM` del entorno Windows antes de cargar las pruebas, al crear el subproceso aislado del ejecutor. El escaneo local de Trivy no se ejecutó porque la revisión automática del entorno rechazó dar acceso al repositorio completo a un contenedor externo. La ejecución remota del pipeline, el análisis SonarQube y las propuestas de Dependabot requieren la configuración y ejecución en GitHub.
+| Indicador | Evidencia en el repositorio | Límite de la evidencia |
+|---|---|---|
+| IE1: contenedores y Dockerfiles | `docker-compose.yml` y los Dockerfiles de `frontend/`, `backend/` y `db/` | Dos componentes de aplicación; no se acreditan dos servicios de negocio distintos. |
+| IE2: pruebas automatizadas | `backend/test.js`, `backend/package.json` y job `pruebas` | La sintaxis del frontend no es prueba unitaria; falta confirmar ejecución remota. |
+| IE3: seguridad y escalabilidad | `sonar-project.properties`, `.github/dependabot.yml`, job `seguridad` y límites de Compose | Trivy y el Quality Gate bloquean según la configuración de esta rama; ejecución remota y autoescalado no acreditados. |
+| IE4: despliegue y trazabilidad | Jobs `construccion` y `despliegue-simulado`, etiquetas con SHA y commits | Despliegue temporal configurado; resultado de GitHub Actions pendiente de comprobar. |
+| IE5: orquestación | `docker-compose.yml`: red, volumen, dependencias y *healthchecks* | El estado saludable de contenedores se complementa con consultas HTTP; no se repitieron aquí. |
 
-## Uso de IA
+## Trabajo de los integrantes
 
-Codex se utilizó como apoyo para revisar código, proponer cambios técnicos y ejecutar verificaciones locales. El equipo debe revisar y validar esta descripción, completar la declaración final de uso de IA y redactar personalmente sus conclusiones, justificaciones y reflexiones conforme a la pauta.
+- **Cristian Alvarez B. (`CrAlvarezb`):** el historial muestra cambios de interfaz para modo oscuro y búsqueda ([`2862af0`](https://github.com/CrAlvarezb/Devops-Evalucacion2/commit/2862af0), [`25d2701`](https://github.com/CrAlvarezb/Devops-Evalucacion2/commit/25d2701)), validación de precio y stock en la API ([`3e4109c`](https://github.com/CrAlvarezb/Devops-Evalucacion2/commit/3e4109c)), el workflow inicial y su adaptación para la evaluación, Dependabot y el README ([`f9d2bcc`](https://github.com/CrAlvarezb/Devops-Evalucacion2/commit/f9d2bcc), [`0181a80`](https://github.com/CrAlvarezb/Devops-Evalucacion2/commit/0181a80), [`9925eea`](https://github.com/CrAlvarezb/Devops-Evalucacion2/commit/9925eea)).
+- **Cristian Caceres G. (`cristianzintro`):** los cambios incluyen el entorno local de Compose ([`554b80a`](https://github.com/CrAlvarezb/Devops-Evalucacion2/commit/554b80a)), trabajo en backend y documentación ([`d5d702c`](https://github.com/CrAlvarezb/Devops-Evalucacion2/commit/d5d702c), [`5a3ba69`](https://github.com/CrAlvarezb/Devops-Evalucacion2/commit/5a3ba69)) y la revisión EP2 de API, pruebas, contenedores, seguridad y pipeline en esta rama ([`2a9bd5a`](https://github.com/CrAlvarezb/Devops-Evalucacion2/commit/2a9bd5a)).
 
-## 7. Reflexiones Personales
+Estas atribuciones describen cambios observados en los commits locales, no la autoría de todo el código anterior. El historial también contiene commits de `MP-Alumno`; no hay datos suficientes para atribuirlos a uno de los dos integrantes. La revisión de PR, la integración de esta rama y el resultado de sus ejecuciones requieren comprobación en GitHub.
 
-Cristian Caceres G.
+## Uso de inteligencia artificial
+
+Codex apoyó la revisión del repositorio y la actualización de este README. El README anterior y el informe técnico registran además apoyo de Codex en una auditoría técnica previa; el equipo debe revisar el alcance de esa declaración antes de entregar. Los usos de otras herramientas mencionados en versiones anteriores no están confirmados aquí. La pauta sobre uso de IA está en [Bibliotecas Duoc UC](https://bibliotecas.duoc.cl/ia). Las justificaciones, conclusiones y reflexiones personales corresponden a los integrantes.
+
+## Reflexiones personales
+
+Se conservan a continuación las reflexiones que ya estaban en el README, sin reescribirlas. Cada integrante debe revisar su propio texto antes de la entrega.
+
+**Cristian Caceres G.**
+
 Como equipo esta evaluación fue un gran desafío, ya que con mi compañero al fin pudimos trabajar desde diferentes ramas integrando estratégicamente cada cambio con su respectivo mensaje, para que no haya ningún cambio sin documentar, como también los errores sean vistos y corregidos a tiempo dentro del flujo de trabajo.
 
-Cristian Alvarez B.
+**Cristian Alvarez B.**
+
 Gracias a la ayuda de la IA, las cuales nos sirven de soporte, pudimos llevar una estructura sencilla y sin caer en errores de sintaxis a la hora de ejecutar los comandos de Git. También nos ayuda a mantener un flujo constante dentro de nuestro proyecto, garantizando un pipeline robusto sin perder la autoría técnica de nuestro trabajo.
